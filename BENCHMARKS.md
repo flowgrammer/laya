@@ -1,3 +1,5 @@
+> **Note:** measurements below are from Convai Innovations' upstream Laya checkpoints ([NandhaKishorM/laya](https://github.com/NandhaKishorM/laya)). This fork loads the same weights via AutoModel.from_pretrained(..., trust_remote_code=True); numbers reproduce.
+
 # Laya benchmarks
 
 Every checkpoint answered **byte-identical questions** in each run (fixed seed). Jev figures are **third-party published, never measured here** — no TypeSafe API access — so sample sizes and prompts differ; treat them as indicative.

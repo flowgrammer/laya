@@ -1,66 +1,78 @@
-name: Release
+name: release
 
-# Tag a commit v0.2.1 and push it; this builds, verifies the version matches the tag,
-# publishes to PyPI and opens a GitHub Release.
+# Tag `schema-vX.Y.Z`, `shim-vX.Y.Z`, or `laya-vX.Y.Z` to build, verify the version matches
+# the tag, publish the corresponding package to PyPI, and open a GitHub Release.
 #
-# Set up once: PyPI -> Publishing -> add a Trusted Publisher for
-#   owner NandhaKishorM, repo laya, workflow release.yml, environment pypi
+# Set up once per package on PyPI -> Publishing -> Trusted Publisher for
+#   owner flowgrammer, repo laya, workflow release.yml, environment pypi
 # Then no API token ever lives in GitHub secrets.
 
 on:
   push:
-    tags: ["v*"]
-  workflow_dispatch:
+    tags:
+      - "schema-v*"
+      - "shim-v*"
+      - "laya-v*"
 
 permissions:
   contents: write        # create the GitHub Release
   id-token: write        # PyPI trusted publishing
 
-env:
-  USE_TF: "0"
-  USE_TORCH: "1"
-
 jobs:
+  test:
+    uses: ./.github/workflows/tests.yml
+
   build:
+    needs: test
     runs-on: ubuntu-latest
+    outputs:
+      dir: ${{ steps.pick.outputs.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          cache: pip
 
-      - name: Install
+      - name: Pick package from tag
+        id: pick
         run: |
-          python -m pip install --upgrade pip build twine
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e .
+          case "${GITHUB_REF_NAME}" in
+            schema-v*) echo "dir=hf-decisions-schema" >> "$GITHUB_OUTPUT" ;;
+            shim-v*)   echo "dir=hf-decisions"        >> "$GITHUB_OUTPUT" ;;
+            laya-v*)   echo "dir=hf-laya"             >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Unknown release tag: $GITHUB_REF_NAME" && exit 1 ;;
+          esac
 
-      - name: Tests must pass before anything is published
-        run: |
-          python tests/test_router.py
-          python tests/test_criteria.py
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build twine
 
-      - name: Build
-        run: python -m build
+      - name: Build sdist and wheel
+        run: python -m build ${{ steps.pick.outputs.dir }}
 
       - name: Version matches the tag
-        if: startsWith(github.ref, 'refs/tags/v')   # workflow_dispatch has no tag to match
         run: |
-          pkg=$(python -c "import re;print(re.search(r'version = \"(.*)\"', open('pyproject.toml').read()).group(1))")
-          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python -c "import re,sys;print(re.search(r'version = \"(.*)\"', open(sys.argv[1]).read()).group(1))" \
+                "${{ steps.pick.outputs.dir }}/pyproject.toml")
+          tag="${GITHUB_REF_NAME#*-v}"
           echo "pyproject=$pkg tag=$tag"
           test "$pkg" = "$tag" || { echo "::error::pyproject version $pkg does not match tag $tag"; exit 1; }
 
-      - run: python -m twine check dist/*
+      - name: Verify sdist and wheel both built
+        run: |
+          ls ${{ steps.pick.outputs.dir }}/dist/*.whl >/dev/null
+          ls ${{ steps.pick.outputs.dir }}/dist/*.tar.gz >/dev/null
+
+      - name: twine check
+        run: python -m twine check ${{ steps.pick.outputs.dir }}/dist/*
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: dist-${{ steps.pick.outputs.dir }}
+          path: ${{ steps.pick.outputs.dir }}/dist/
 
   pypi:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -68,18 +80,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: dist-${{ needs.build.outputs.dir }}
           path: dist/
-      # Needs a Trusted Publisher on PyPI (Publishing -> add: owner NandhaKishorM,
-      # repo laya, workflow release.yml, environment pypi). Until that exists the
-      # exchange fails; skip-existing also makes a re-run safe after a manual upload.
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
 
   github_release:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -89,7 +97,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: dist-${{ needs.build.outputs.dir }}
           path: dist/
       - name: Publish release
         env:

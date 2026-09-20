@@ -1,11 +1,27 @@
 version: 2
 updates:
+  # One pip entry per package: dependabot resolves each pyproject.toml separately, so per-package
+  # dependency updates arrive as scoped PRs rather than a single sweeping "bump everything" PR.
   - package-ecosystem: pip
-    directory: "/"
+    directory: "/hf-decisions-schema"
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    labels: [dependencies]
+    labels: [dependencies, hf-decisions-schema]
+
+  - package-ecosystem: pip
+    directory: "/hf-decisions"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, hf-decisions]
+
+  - package-ecosystem: pip
+    directory: "/hf-laya"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies, hf-laya]
 
   # Actions are the other half of the supply chain: a compromised action runs with the
   # workflow's token. Keep them current, and prefer pinning to a SHA for third-party ones.

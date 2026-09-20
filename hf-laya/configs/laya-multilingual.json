@@ -1,0 +1,34 @@
+{
+    "model_type": "laya",
+    "architectures": ["LayaForTypedDecision"],
+    "auto_map": {
+        "AutoConfig": "configuration_laya.LayaConfig",
+        "AutoModel": "modeling_laya.LayaForTypedDecision",
+        "AutoProcessor": "processing_laya.LayaProcessor"
+    },
+
+    "encoder_config": {
+        "model_type": "modernbert",
+        "hidden_size": 768,
+        "num_hidden_layers": 22,
+        "num_attention_heads": 12,
+        "intermediate_size": 1152,
+        "vocab_size": 256000,
+        "max_position_embeddings": 8192
+    },
+
+    "head_layers": 2,
+    "n_act": 2,
+    "act_costs": {"escalate": 0.5},
+    "cost_wrong_act": 3.0,
+    "amp_dtype": "bf16",
+    "max_prefixes": 6,
+    "temperature": [1.0, 1.0, 1.0],
+    "temperature_by_options": {},
+    "head_max_len": 256,
+    "max_len": 1024,
+    "library_tag": "encoder-head",
+
+    "torch_dtype": "float32",
+    "transformers_version": "4.45.0"
+}

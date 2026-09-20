@@ -45,20 +45,33 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install pip-audit
-      - name: Audit declared dependencies
+      - name: Audit declared dependencies of every package
         run: |
-          # Audit what the package DECLARES, not a local install. Installing torch from the
+          # Audit what each package DECLARES, not a local install. Installing torch from the
           # PyTorch CPU index yields a local version (2.14.0+cpu) that does not exist on PyPI,
           # so pip-audit cannot resolve it and --strict fails the job on that alone.
-          python - <<'PY' > requirements-audit.txt
-          import re
-          src = open("pyproject.toml").read()
+          # Skip sibling in-repo packages (`hf-decisions-schema`, `hf-decisions`, `hf-laya`)
+          # from the audit input — they aren't on PyPI yet, so pip-audit's resolver would
+          # fail before checking the third-party deps we actually want to scan.
+          for pkg in hf-decisions-schema hf-decisions hf-laya; do
+            echo "=== audit: $pkg ==="
+            python - "$pkg/pyproject.toml" <<'PY' > "requirements-$pkg.txt"
+          import re, sys
+          INTERNAL = {"hf-decisions-schema", "hf-decisions", "hf-laya"}
+          src = open(sys.argv[1]).read()
           block = re.search(r"dependencies = \[(.*?)\]", src, re.S).group(1)
           for dep in re.findall(r'"([^"]+)"', block):
-              print(dep)
+              name = re.split(r"[=<>~!]", dep, 1)[0].strip()
+              if name not in INTERNAL:
+                  print(dep)
           PY
-          cat requirements-audit.txt
-          pip-audit --strict --desc -r requirements-audit.txt
+            cat "requirements-$pkg.txt"
+            if [ -s "requirements-$pkg.txt" ]; then
+              pip-audit --strict --desc -r "requirements-$pkg.txt"
+            else
+              echo "no external deps to audit"
+            fi
+          done
 
   codeql:
     name: CodeQL
@@ -84,17 +97,19 @@ jobs:
         run: |
           # torch.load / pickle execute arbitrary code during deserialization. Laya loads
           # checkpoints from the Hub, so a pickle path would be remote code execution on
-          # `laya.load("someone/their-model")`.
-          if grep -rnE "\bpickle\b|torch\.load\(|joblib\.load\(|yaml\.load\(" laya/; then
-            echo "::error::unsafe deserialization in the shipped package - use safetensors"
+          # `AutoModel.from_pretrained("someone/their-model", trust_remote_code=True)`.
+          TARGETS="hf-laya/ hf-decisions/ hf-decisions-schema/"
+          if grep -rnE --include="*.py" "\bpickle\b|torch\.load\(|joblib\.load\(|yaml\.load\(" $TARGETS; then
+            echo "::error::unsafe deserialization in the shipped packages - use safetensors"
             exit 1
           fi
-          echo "OK: no pickle/torch.load/yaml.load in laya/"
-      - name: No shell-out or dynamic exec in the shipped package
+          echo "OK: no pickle/torch.load/yaml.load in shipped packages"
+      - name: No shell-out or dynamic exec in the shipped packages
         run: |
-          if grep -rnE "os\.system\(|subprocess\.|shell=True|\beval\(|\bexec\(" laya/ \
+          TARGETS="hf-laya/ hf-decisions/ hf-decisions-schema/"
+          if grep -rnE --include="*.py" "os\.system\(|subprocess\.|shell=True|\beval\(|\bexec\(" $TARGETS \
                | grep -v "\.eval()"; then
-            echo "::error::shell-out or dynamic execution in the shipped package"
+            echo "::error::shell-out or dynamic execution in the shipped packages"
             exit 1
           fi
-          echo "OK: no os.system/subprocess/eval/exec in laya/"
+          echo "OK: no os.system/subprocess/eval/exec in shipped packages"
